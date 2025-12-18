@@ -16,7 +16,6 @@ import {
 } from "@/lib/exchanges/binance/exchangeInfo";
 import {
   getTicker24h,
-  getBookTicker,
   getOrderBook,
   getAggTrades,
   getKlines
@@ -32,8 +31,51 @@ export function MarketLab() {
   const [ticker, setTicker] = React.useState<any>(null);
   const [orderBook, setOrderBook] = React.useState<any>(null);
 
+  const [pythonResponse, setPythonResponse] = React.useState<any>(
+    "Waiting for python endpoint..."
+  );
+
   // Startup diagnostics
   React.useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("http://localhost:8001/compute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            candles: [
+              {
+                time: 1,
+                open: 100,
+                high: 105,
+                low: 95,
+                close: 102,
+                volume: 10
+              },
+              {
+                time: 2,
+                open: 102,
+                high: 110,
+                low: 101,
+                close: 108,
+                volume: 12
+              }
+            ]
+          })
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`HTTP ${res.status}: ${text}`);
+        }
+
+        const data = await res.json();
+        setPythonResponse(JSON.stringify(data));
+      } catch (err) {
+        setPythonResponse(String(err));
+      }
+    })();
+
     logBinanceConfig();
 
     (async () => {
@@ -114,6 +156,11 @@ export function MarketLab() {
       <section>
         <h2>Order Book (Top)</h2>
         <pre>{JSON.stringify(orderBook, null, 2)}</pre>
+      </section>
+
+      <section>
+        <h2>pythonResponse</h2>
+        <pre>{pythonResponse}</pre>
       </section>
     </>
   );
