@@ -36,6 +36,7 @@ export class HttpError extends Error {
   status: number;
   body: unknown;
   retryAfterSeconds?: number;
+  kind?: string;
 
   constructor(
     message: string,
@@ -78,6 +79,12 @@ export class HttpClient {
     path: string,
     options: HttpRequestOptions = {}
   ): Promise<T> {
+    console.log("method: ", method);
+    console.log("path: ", path);
+    console.log("options: ", options);
+
+    console.log("baseUrl:", this.baseUrl);
+
     const url = this.buildUrl(path, options.params);
 
     // Only set headers when needed. For GETs with no body, keep it simple.
@@ -138,9 +145,19 @@ export class HttpClient {
 
   private buildUrl(path: string, params?: QueryParams): string {
     const hasProtocol = /^https?:\/\//i.test(path);
-    const base = hasProtocol ? "" : this.baseUrl;
 
-    const url = new URL(hasProtocol ? path : `${base}${path}`);
+    // If "path" is absolute, trust it.
+    // Otherwise, join baseUrl + path as a relative URL against an origin.
+    const origin =
+      typeof window !== "undefined"
+        ? window.location.origin
+        : "http://localhost";
+
+    const raw = hasProtocol
+      ? path
+      : `${this.baseUrl}${path.startsWith("/") ? "" : "/"}${path}`;
+
+    const url = new URL(raw, origin);
 
     if (params) {
       for (const [key, value] of Object.entries(params)) {
@@ -165,6 +182,6 @@ export class HttpClient {
  * If you haven’t added the proxy yet, you can temporarily set:
  *   NEXT_PUBLIC_BINANCE_REST_URL=https://api.binance.com
  */
-export const binanceHttp = new HttpClient(
-  process.env.NEXT_PUBLIC_BINANCE_REST_URL ?? "/api/binance"
-);
+import { BINANCE } from "@/lib/exchanges/binance/config";
+
+export const binanceHttp = new HttpClient(BINANCE.restUrl);
