@@ -11,6 +11,7 @@ This project is designed to evolve incrementally toward professional quant-devel
 ## Tech Stack
 
 - Frontend: Next.js (App Router), React, TypeScript
+- UI: Tailwind CSS + shadcn/ui (Radix UI primitives + CVA variants)
 - State Management: Redux Toolkit
 - API / Backend: Node.js (Next.js route handlers, additional services planned)
 - Research & Compute: Python (FastAPI-based research service)
@@ -27,6 +28,40 @@ This project is designed to evolve incrementally toward professional quant-devel
 - python/research-service — Python research & compute service (FastAPI)
 - db — schemas, migrations, and seed data (planned)
 - docs — roadmap, decisions, and architecture notes
+
+---
+
+## UI Components (shadcn/ui)
+
+This repository uses shadcn/ui for UI primitives such as Card, Button, Badge, Input, Table, and Tabs.
+
+Important: shadcn/ui is NOT a runtime dependency or component library.
+It is a code generator that copies React components directly into the repository.
+Once generated, the components are fully owned by this codebase and can be edited freely.
+
+The generated components live in:
+
+- apps/web/src/ui/_
+  (or apps/web/src/components/ui/_ depending on repo configuration)
+
+They are built using:
+
+- Tailwind CSS for styling
+- Radix UI for accessible behaviour
+- class-variance-authority (CVA) for variants
+- cn() utility from lib/utils for class merging
+
+### Adding more UI components
+
+If shadcn is already initialised (components.json exists), new components can be added with:
+
+npx shadcn@latest add alert dialog dropdown-menu tooltip table tabs
+
+This will generate new files inside the configured UI directory.
+
+To verify or change where components are generated, inspect:
+
+- components.json (aliases and ui path)
 
 ---
 
