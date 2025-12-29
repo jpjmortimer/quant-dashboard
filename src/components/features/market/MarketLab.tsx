@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import * as React from "react";
 import { logBinanceConfig, BINANCE } from "@/lib/exchanges/binance/config";
 import { HttpError } from "@/lib/http";
 import {
@@ -9,6 +9,16 @@ import {
 } from "@/lib/exchanges/binance/time";
 import { getExchangeInfo } from "@/lib/exchanges/binance/exchangeInfo";
 import { getTicker24h, getOrderBook } from "@/lib/exchanges/binance/marketData";
+
+import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 
 type ApiStatus = "idle" | "ok" | "down";
 
@@ -49,6 +59,49 @@ async function postPythonCompute(signal?: AbortSignal) {
   return res.json();
 }
 
+/* ----------------------------- small, local bits ----------------------------- */
+
+function StatusBadge({ status }: { status: ApiStatus }) {
+  if (status === "ok") return <Badge variant="secondary">OK</Badge>;
+  if (status === "down") return <Badge variant="destructive">DOWN</Badge>;
+  return <Badge variant="outline">IDLE</Badge>;
+}
+
+function CodeBlock({ value }: { value: unknown }) {
+  const text =
+    typeof value === "string" ? value : JSON.stringify(value, null, 2);
+
+  return (
+    <pre className="overflow-auto rounded-lg bg-slate-950 p-4 text-xs leading-relaxed text-slate-100">
+      <code>{text}</code>
+    </pre>
+  );
+}
+
+function AlertCard({
+  title,
+  variant,
+  children
+}: {
+  title: string;
+  variant: "warn" | "error";
+  children: React.ReactNode;
+}) {
+  const styles =
+    variant === "warn"
+      ? "border-amber-200 bg-amber-50 text-amber-950"
+      : "border-rose-200 bg-rose-50 text-rose-950";
+
+  return (
+    <div className={`rounded-xl border p-4 ${styles}`}>
+      <div className="text-sm font-semibold">{title}</div>
+      <div className="mt-1 text-sm opacity-90">{children}</div>
+    </div>
+  );
+}
+
+/* --------------------------------- Feature --------------------------------- */
+
 export function MarketLab() {
   const [symbol, setSymbol] = React.useState(
     BINANCE.defaultSymbol.toUpperCase()
@@ -79,7 +132,7 @@ export function MarketLab() {
       // Python probe (independent)
       try {
         const data = await postPythonCompute(controller.signal);
-        setPythonResponse(JSON.stringify(data));
+        setPythonResponse(JSON.stringify(data, null, 2));
       } catch (err) {
         setPythonResponse(formatError(err));
       }
@@ -106,7 +159,6 @@ export function MarketLab() {
     }
 
     loadStartup();
-
     return () => controller.abort();
   }, []);
 
@@ -132,14 +184,10 @@ export function MarketLab() {
       } catch (err) {
         if (controller.signal.aborted) return;
 
-        // Decide whether the API is down vs just a “bad request”
         if (err instanceof HttpError && err.kind === "network")
           setApiStatus("down");
 
         setError(formatError(err));
-        // Optional: keep last good data visible, or clear it:
-        // setTicker(null);
-        // setOrderBook(null);
       }
     }
 
@@ -148,68 +196,130 @@ export function MarketLab() {
   }, [symbol]);
 
   return (
-    <>
-      <h1>Market Lab</h1>
+    <div className="mx-auto w-full max-w-5xl space-y-4 p-4 sm:p-6">
+      <header className="space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight">Market Lab</h1>
+        <p className="text-sm text-muted-foreground">
+          Diagnostics for exchange connectivity, time sync, market-data
+          endpoints and the local Python compute bridge.
+        </p>
+      </header>
 
-      <label>
-        Symbol:
-        <input
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-        />
-      </label>
+      <Card>
+        <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+          <div className="min-w-0">
+            <CardTitle>Controls</CardTitle>
+            <CardDescription>
+              Change the symbol to re-run REST probes (24h ticker + top-of-book
+              depth).
+            </CardDescription>
+          </div>
+          <StatusBadge status={apiStatus} />
+        </CardHeader>
 
-      {apiStatus === "down" && (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 12,
-            border: "1px solid",
-            borderRadius: 8
-          }}
-        >
-          Binance API unreachable (are you pointing at a local proxy that isn’t
-          running?).
-        </div>
-      )}
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Symbol</label>
+              <Input
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                placeholder="e.g. BTCUSDT"
+              />
+            </div>
 
-      {error && (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 12,
-            border: "1px solid",
-            borderRadius: 8
-          }}
-        >
-          <strong>Error:</strong> {error}
-        </div>
-      )}
+            <div className="rounded-xl border bg-muted/40 p-3">
+              <div className="text-sm font-medium">Tip</div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Use Binance symbols like{" "}
+                <span className="font-mono">BTCUSDT</span>,{" "}
+                <span className="font-mono">ETHUSDT</span>,{" "}
+                <span className="font-mono">SOLUSDT</span>.
+              </p>
+            </div>
+          </div>
 
-      <section>
-        <h2>Clock Skew</h2>
-        <pre>{skew}</pre>
-      </section>
+          {apiStatus === "down" ? (
+            <AlertCard title="Binance API unreachable" variant="warn">
+              This usually means you’re pointing at a local proxy that isn’t
+              running, or the network request is failing (CORS / DNS / offline).
+            </AlertCard>
+          ) : null}
 
-      <section>
-        <h2>Exchange Info</h2>
-        <pre>{JSON.stringify(exchangeInfo, null, 2)}</pre>
-      </section>
+          {error ? (
+            <AlertCard title="Error" variant="error">
+              {error}
+            </AlertCard>
+          ) : null}
+        </CardContent>
+      </Card>
 
-      <section>
-        <h2>24h Ticker</h2>
-        <pre>{JSON.stringify(ticker, null, 2)}</pre>
-      </section>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Clock Skew</CardTitle>
+            <CardDescription>
+              Difference between your local clock and Binance server time. Large
+              skew can break signed endpoints and distort timestamped data.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CodeBlock value={skew} />
+          </CardContent>
+        </Card>
 
-      <section>
-        <h2>Order Book (Top)</h2>
-        <pre>{JSON.stringify(orderBook, null, 2)}</pre>
-      </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Exchange Info</CardTitle>
+            <CardDescription>
+              Exchange metadata (timezone + number of symbols). Useful to verify
+              adapter config and symbol universe.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CodeBlock value={exchangeInfo} />
+          </CardContent>
+        </Card>
 
-      <section>
-        <h2>Python Response</h2>
-        <pre>{pythonResponse}</pre>
-      </section>
-    </>
+        <Card>
+          <CardHeader>
+            <CardTitle>24h Ticker</CardTitle>
+            <CardDescription>
+              Rolling 24-hour snapshot for the symbol (price change, volume,
+              high/low). Handy liveness check.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CodeBlock value={ticker} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Order Book Top</CardTitle>
+            <CardDescription>
+              Best bid/ask (top-of-book). Useful for spread sanity checks and
+              depth response validation.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CodeBlock value={orderBook} />
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Python Response</CardTitle>
+            <CardDescription>
+              Result from your local Python service. Confirms the browser →
+              backend bridge and JSON payload handling.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CodeBlock value={pythonResponse} />
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 }
