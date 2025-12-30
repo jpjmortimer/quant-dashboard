@@ -107,7 +107,7 @@ export function mapWsKlineToCandle(msg: BinanceKlineWsMessage): Candle {
  */
 export async function getKlinesXm(
   symbol: string,
-  intervalMinutes = 1,
+  intervalMinutes = "1m",
   limit = 500
 ): Promise<Candle[]> {
   const upperSymbol = symbol.toUpperCase();
@@ -115,7 +115,7 @@ export async function getKlinesXm(
   const url =
     `${BINANCE.restUrl}/api/v3/klines` +
     `?symbol=${upperSymbol}` +
-    `&interval=${intervalMinutes}m` +
+    `&interval=${intervalMinutes}` +
     `&limit=${limit}`;
 
   const res = await fetch(url);

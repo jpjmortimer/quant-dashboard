@@ -1,3 +1,10 @@
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 import { type StrategyId, type StrategySelectorProps } from "@/types/types";
 
 const strategies: { id: StrategyId; name: string }[] = [
@@ -13,20 +20,25 @@ export function StrategySelector({
   setStrategyId
 }: StrategySelectorProps) {
   return (
-    <div>
-      <label>
-        <span style={{ marginRight: "0.5rem" }}>Strategy:</span>
-        <select
-          value={strategyId}
-          onChange={(e) => setStrategyId(e.target.value as StrategyId)}
-        >
+    <div className="flex flex-col gap-2">
+      <label className="text-sm font-medium">Strategy:</label>
+
+      <Select
+        value={strategyId}
+        onValueChange={(value) => setStrategyId(value as StrategyId)}
+      >
+        <SelectTrigger className="w-[260px]">
+          <SelectValue placeholder="Select strategy" />
+        </SelectTrigger>
+
+        <SelectContent>
           {strategies.map((strategy) => (
-            <option key={strategy.id} value={strategy.id}>
+            <SelectItem key={strategy.id} value={strategy.id}>
               {strategy.name}
-            </option>
+            </SelectItem>
           ))}
-        </select>
-      </label>
+        </SelectContent>
+      </Select>
     </div>
   );
 }

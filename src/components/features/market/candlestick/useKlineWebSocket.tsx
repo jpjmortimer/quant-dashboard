@@ -4,7 +4,7 @@ import type { Candle, BinanceKlineWsMessage } from "./candlestickHelpers";
 
 export function useKlineWebSocket(
   symbol: string,
-  interval = 1,
+  interval = "1m",
   updateCandles: React.Dispatch<React.SetStateAction<Candle[]>>
 ) {
   React.useEffect(() => {

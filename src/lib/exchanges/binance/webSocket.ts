@@ -199,9 +199,10 @@ export class BinanceTradeWebSocket {
     };
 
     ws.onclose = (event) => {
-      console.log(
-        `[BinanceTradeWebSocket] closed (code=${event.code}, reason="${event.reason}")`
+      console.warn(
+        `[BinanceTradeWebSocket] closed (code=${event.code}, reason="${event.reason}, was clean=${event.wasClean}")`
       );
+      console.warn("[BinanceTradeWebSocket] event: ", event);
       this.onClose?.(event);
       this.ws = null;
     };

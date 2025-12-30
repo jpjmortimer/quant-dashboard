@@ -5,7 +5,7 @@ import {
   type Candle
 } from "@/components/features/market/candlestick/candlestickHelpers";
 
-export function useKlineHistory(symbol: string, interval = 1) {
+export function useKlineHistory(symbol: string, interval = "1m") {
   const [candles, setCandles] = React.useState<Candle[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);

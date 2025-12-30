@@ -9,6 +9,7 @@ import {
 } from "@/lib/exchanges/binance/time";
 import { getExchangeInfo } from "@/lib/exchanges/binance/exchangeInfo";
 import { getTicker24h, getOrderBook } from "@/lib/exchanges/binance/marketData";
+import { SymbolSelector } from "@/components/features/market/SymbolSelector";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -18,7 +19,6 @@ import {
   CardHeader,
   CardTitle
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 
 type ApiStatus = "idle" | "ok" | "down";
 
@@ -103,7 +103,7 @@ function AlertCard({
 /* --------------------------------- Feature --------------------------------- */
 
 export function MarketLab() {
-  const [symbol, setSymbol] = React.useState(
+  const [selectedSymbol, setSelectedSymbol] = React.useState<string>(
     BINANCE.defaultSymbol.toUpperCase()
   );
 
@@ -113,6 +113,10 @@ export function MarketLab() {
   const [skew, setSkew] = React.useState<string>("Checking…");
   const [exchangeInfo, setExchangeInfo] =
     React.useState<ExchangeInfoSummary | null>(null);
+
+  // ✅ symbol universe from exchangeInfo
+  const [symbols, setSymbols] = React.useState<string[]>([]);
+  const [symbolsLoading, setSymbolsLoading] = React.useState<boolean>(true);
 
   const [ticker, setTicker] = React.useState<unknown>(null);
   const [orderBook, setOrderBook] = React.useState<OrderBookTop | null>(null);
@@ -137,7 +141,7 @@ export function MarketLab() {
         setPythonResponse(formatError(err));
       }
 
-      // Binance time + exchange info (independent; don’t let one break the other)
+      // Binance time
       try {
         const serverTime = await getServerTime();
         const skewMs = calculateClockSkewMs(Date.now(), serverTime);
@@ -147,14 +151,39 @@ export function MarketLab() {
         setError((prev) => prev ?? `Clock skew: ${formatError(err)}`);
       }
 
+      // ✅ Exchange info + symbol list
       try {
+        setSymbolsLoading(true);
         const info = await getExchangeInfo();
+
         setExchangeInfo({
           timezone: info.timezone,
           symbols: info.symbols.length
         });
+
+        // OPTION A: all symbols
+        // const all = info.symbols.map((s) => s.symbol);
+
+        // OPTION B (recommended): only TRADING + USDT quote (keeps dropdown usable)
+        const filtered = info.symbols
+          .filter((s) => s.status === "TRADING" && s.quoteAsset === "USDT")
+          .map((s) => s.symbol);
+
+        setSymbols(filtered);
+
+        // Ensure selectedSymbol exists in the new universe
+        setSelectedSymbol((prev) => {
+          const next = prev?.toUpperCase?.() ?? "";
+          if (filtered.includes(next)) return next;
+          // fall back to defaultSymbol if present, else first in list, else keep prev
+          const def = BINANCE.defaultSymbol.toUpperCase();
+          if (filtered.includes(def)) return def;
+          return filtered[0] ?? next;
+        });
       } catch (err) {
         setError((prev) => prev ?? `Exchange info: ${formatError(err)}`);
+      } finally {
+        setSymbolsLoading(false);
       }
     }
 
@@ -164,6 +193,8 @@ export function MarketLab() {
 
   // REST probes per symbol
   React.useEffect(() => {
+    if (!selectedSymbol) return;
+
     const controller = new AbortController();
 
     async function loadSymbol() {
@@ -171,8 +202,8 @@ export function MarketLab() {
 
       try {
         const [ticker24h, depth] = await Promise.all([
-          getTicker24h(symbol, { signal: controller.signal }),
-          getOrderBook(symbol, 10, { signal: controller.signal })
+          getTicker24h(selectedSymbol, { signal: controller.signal }),
+          getOrderBook(selectedSymbol, 10, { signal: controller.signal })
         ]);
 
         setApiStatus("ok");
@@ -193,7 +224,7 @@ export function MarketLab() {
 
     loadSymbol();
     return () => controller.abort();
-  }, [symbol]);
+  }, [selectedSymbol]);
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4 p-4 sm:p-6">
@@ -220,12 +251,22 @@ export function MarketLab() {
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Symbol</label>
-              <Input
-                value={symbol}
-                onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-                placeholder="e.g. BTCUSDT"
-              />
+              {symbolsLoading ? (
+                <div className="text-sm text-muted-foreground">
+                  Loading symbols…
+                </div>
+              ) : symbols.length === 0 ? (
+                <AlertCard title="No symbols found" variant="warn">
+                  Exchange info loaded but returned no TRADING USDT symbols.
+                  Remove the filter if you want the full universe.
+                </AlertCard>
+              ) : (
+                <SymbolSelector
+                  symbols={symbols}
+                  selectedSymbol={selectedSymbol}
+                  setSelectedSymbol={setSelectedSymbol}
+                />
+              )}
             </div>
 
             <div className="rounded-xl border bg-muted/40 p-3">
