@@ -13,7 +13,7 @@ This project is designed to evolve incrementally toward professional quant-devel
 - Frontend: Next.js (App Router), React, TypeScript
 - UI: Tailwind CSS + shadcn/ui (Radix UI primitives + CVA variants)
 - State Management: Redux Toolkit
-- API / Backend: Node.js (Next.js route handlers, additional services planned)
+- API / Orchestration: Node.js + NestJS
 - Research & Compute: Python (FastAPI-based research service)
 - Data Storage (planned): SQLite (local), Postgres (later)
 
@@ -21,13 +21,16 @@ This project is designed to evolve incrementally toward professional quant-devel
 
 ## Repository Structure
 
-- apps/web — Next.js UI (dashboard, market lab, backtests)
-- apps/api — API routes and server-side proxies (Next.js)
-- services — standalone services and experiments (planned)
-- packages/shared — shared TypeScript types and utilities
-- python/research-service — Python research & compute service (FastAPI)
-- db — schemas, migrations, and seed data (planned)
-- docs — roadmap, decisions, and architecture notes
+.
+├─ apps/
+│ ├─ web/ # Next.js UI (dashboard, market lab, backtests)
+│ └─ api/ # Next.js route handlers / server-side proxies
+├─ node/ # Node / NestJS research & diagnostics service
+├─ python/ # Python research & compute service (FastAPI)
+├─ packages/
+│ └─ shared/ # Shared TypeScript types & utilities
+├─ db/ # Schemas, migrations, seed data (planned)
+├─ docs/ # Roadmap, decisions, architecture notes
 
 ---
 
@@ -41,8 +44,7 @@ Once generated, the components are fully owned by this codebase and can be edite
 
 The generated components live in:
 
-- apps/web/src/ui/_
-  (or apps/web/src/components/ui/_ depending on repo configuration)
+- apps/web/src/components/ui/
 
 They are built using:
 
@@ -57,15 +59,31 @@ If shadcn is already initialised (components.json exists), new components can be
 
 npx shadcn@latest add alert dialog dropdown-menu tooltip table tabs
 
-This will generate new files inside the configured UI directory.
-
 To verify or change where components are generated, inspect:
 
 - components.json (aliases and ui path)
 
 ---
 
-## Python Research Service
+## Node Research Service (NestJS)
+
+A lightweight NestJS service used as a diagnostics and orchestration layer.
+
+Current capabilities:
+
+- Health and metadata endpoints (/health, /meta)
+- Aggregated diagnostics endpoint (/diag)
+- Typed request/response contracts
+- A foundational /compute endpoint mirroring the Python service
+- Designed to evolve into a gateway for Python compute, persistence, and scheduling
+
+Default local port:
+
+http://localhost:3001
+
+---
+
+## Python Research Service (FastAPI)
 
 A lightweight FastAPI service used for numerical and research-oriented computation.
 
@@ -78,22 +96,26 @@ Current capabilities:
 
 The Python service is intentionally minimal and stateless at this stage and will be extended incrementally as research needs grow.
 
+Default local port:
+
+http://localhost:8001
+
+---
+
+## Service Topology (Local Development)
+
+Browser (Next.js UI) -> http://localhost:3000
+Node / NestJS -> http://localhost:3001
+Python FastAPI -> http://localhost:8001
+
 ---
 
 ## Getting Started
 
-Install dependencies and start the development server:
+Install dependencies and start the frontend:
 
 npm install
 npm run dev
-
-Start the Python research service (separately):
-
-cd python/research-service
-python -m venv .venv
-source .venv/bin/activate
-pip install fastapi uvicorn pydantic
-uvicorn main:app --reload --port 8001
 
 Then open:
 
@@ -101,11 +123,29 @@ http://localhost:3000
 
 ---
 
+### Python Research Service
+
+cd services/research-python
+python -m venv .venv
+source .venv/bin/activate
+pip install fastapi uvicorn pydantic
+uvicorn main:app --reload --port 8001
+
+---
+
+### Node Research Service (NestJS)
+
+cd services/research-node
+npm install
+npm run start:dev
+
+---
+
 ## Development Principles
 
 - Explicit, modular architecture
 - Reproducible data and research workflows
-- Clear separation between UI, API, and compute layers
+- Clear separation between UI, orchestration, and compute layers
 - Small, readable commits
 - Educational focus over production trading claims
 
