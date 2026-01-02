@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { SERVICES } from "@/lib/service";
 import { logBinanceConfig, BINANCE } from "@/lib/exchanges/binance/config";
 import { HttpError } from "@/lib/http";
 import {
@@ -39,7 +40,7 @@ function formatError(err: unknown): string {
 }
 
 async function postPythonCompute(signal?: AbortSignal) {
-  const res = await fetch("http://localhost:8001/compute", {
+  const res = await fetch(`${SERVICES.python}/compute`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal,
@@ -54,6 +55,27 @@ async function postPythonCompute(signal?: AbortSignal) {
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Python HTTP ${res.status}: ${text}`);
+  }
+
+  return res.json();
+}
+
+async function postNodeCompute(signal?: AbortSignal) {
+  const res = await fetch(`${SERVICES.node}/compute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal,
+    body: JSON.stringify({
+      candles: [
+        { time: 1, open: 100, high: 110, low: 95, close: 110, volume: 10 },
+        { time: 2, open: 102, high: 120, low: 101, close: 120, volume: 12 }
+      ]
+    })
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Node HTTP ${res.status}: ${text}`);
   }
 
   return res.json();
@@ -125,6 +147,10 @@ export function MarketLab() {
     "Waiting for python endpoint…"
   );
 
+  const [nodeResponse, setNodeResponse] = React.useState<string>(
+    "Waiting for node endpoint…"
+  );
+
   // Startup diagnostics (runs once)
   React.useEffect(() => {
     const controller = new AbortController();
@@ -139,6 +165,14 @@ export function MarketLab() {
         setPythonResponse(JSON.stringify(data, null, 2));
       } catch (err) {
         setPythonResponse(formatError(err));
+      }
+
+      // Node/Nest probe (independent)
+      try {
+        const data = await postNodeCompute(controller.signal);
+        setNodeResponse(JSON.stringify(data, null, 2));
+      } catch (err) {
+        setNodeResponse(formatError(err));
       }
 
       // Binance time
@@ -232,7 +266,7 @@ export function MarketLab() {
         <h1 className="text-2xl font-semibold tracking-tight">Market Lab</h1>
         <p className="text-sm text-muted-foreground">
           Diagnostics for exchange connectivity, time sync, market-data
-          endpoints and the local Python compute bridge.
+          endpoints and the local Python + Node compute bridges.
         </p>
       </header>
 
@@ -348,7 +382,7 @@ export function MarketLab() {
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2">
+        <Card>
           <CardHeader>
             <CardTitle>Python Response</CardTitle>
             <CardDescription>
@@ -358,6 +392,19 @@ export function MarketLab() {
           </CardHeader>
           <CardContent>
             <CodeBlock value={pythonResponse} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Node/Nest Response</CardTitle>
+            <CardDescription>
+              Result from your local Nest service. Confirms the browser →
+              backend bridge and JSON payload handling.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CodeBlock value={nodeResponse} />
           </CardContent>
         </Card>
       </div>
