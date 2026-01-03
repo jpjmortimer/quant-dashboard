@@ -33,6 +33,40 @@ type OrderBookTop = {
   ask: [string, string] | null;
 };
 
+/**
+ * NOTE:
+ * Your tracked-symbols endpoint returns `{ symbols: [...] }`.
+ * Your symbol-relationships endpoint might return either:
+ *   - `{ symbols: [...] }` (if you reused the same shape), OR
+ *   - `{ relationships: [...] }` (more semantically correct)
+ *
+ * To keep the Lab page resilient while you iterate, we support BOTH.
+ */
+type TrackedSymbolRow = {
+  symbol: string;
+  enabled: boolean;
+  added_at: string;
+};
+
+type SymbolRelationshipRow = {
+  id?: number;
+  symbol: string;
+  impactor_symbol: string;
+  weight: number;
+  enabled: boolean;
+  added_at: string;
+};
+
+type TrackedSymbolsResponse = {
+  symbols: TrackedSymbolRow[];
+};
+
+// tolerant shape for relationships
+type SymbolRelationshipsResponse = {
+  symbols?: SymbolRelationshipRow[];
+  relationships?: SymbolRelationshipRow[];
+};
+
 function formatError(err: unknown): string {
   if (err instanceof HttpError) return `${err.kind}: ${err.message}`;
   if (err instanceof Error) return err.message;
@@ -122,6 +156,54 @@ function AlertCard({
   );
 }
 
+/* ------------------------------ local API calls ------------------------------ */
+
+async function getTrackedSymbols(signal?: AbortSignal) {
+  const res = await fetch("/api/tracked-symbols", {
+    signal,
+    cache: "no-store"
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`TrackedSymbols HTTP ${res.status}: ${text}`);
+  }
+
+  return (await res.json()) as TrackedSymbolsResponse;
+}
+
+async function getSymbolRelationships(signal?: AbortSignal) {
+  const res = await fetch("/api/symbol-relationships", {
+    signal,
+    cache: "no-store"
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`SymbolRelationships HTTP ${res.status}: ${text}`);
+  }
+
+  return (await res.json()) as SymbolRelationshipsResponse;
+}
+
+function normaliseRelationshipsResponse(
+  data: SymbolRelationshipsResponse
+): SymbolRelationshipRow[] {
+  const rows = (data.relationships ??
+    data.symbols ??
+    []) as SymbolRelationshipRow[];
+
+  // Defensive normalisation (in case weight/enabled missing while you iterate)
+  return rows.map((r) => ({
+    id: r.id,
+    symbol: String(r.symbol ?? "").toUpperCase(),
+    impactor_symbol: String(r.impactor_symbol ?? "").toUpperCase(),
+    weight: typeof r.weight === "number" ? r.weight : 1,
+    enabled: typeof r.enabled === "boolean" ? r.enabled : true,
+    added_at: String(r.added_at ?? "")
+  }));
+}
+
 /* --------------------------------- Feature --------------------------------- */
 
 export function MarketLab() {
@@ -150,6 +232,18 @@ export function MarketLab() {
   const [nodeResponse, setNodeResponse] = React.useState<string>(
     "Waiting for node endpoint…"
   );
+
+  // tracked symbols debug
+  const [trackedStatus, setTrackedStatus] = React.useState<ApiStatus>("idle");
+  const [trackedError, setTrackedError] = React.useState<string | null>(null);
+  const [trackedSymbols, setTrackedSymbols] = React.useState<string[]>([]);
+  const [trackedRaw, setTrackedRaw] = React.useState<unknown>(null);
+
+  // relationships debug
+  const [relsStatus, setRelsStatus] = React.useState<ApiStatus>("idle");
+  const [relsError, setRelsError] = React.useState<string | null>(null);
+  const [rels, setRels] = React.useState<SymbolRelationshipRow[]>([]);
+  const [relsRaw, setRelsRaw] = React.useState<unknown>(null);
 
   // Startup diagnostics (runs once)
   React.useEffect(() => {
@@ -195,9 +289,6 @@ export function MarketLab() {
           symbols: info.symbols.length
         });
 
-        // OPTION A: all symbols
-        // const all = info.symbols.map((s) => s.symbol);
-
         // OPTION B (recommended): only TRADING + USDT quote (keeps dropdown usable)
         const filtered = info.symbols
           .filter((s) => s.status === "TRADING" && s.quoteAsset === "USDT")
@@ -209,7 +300,6 @@ export function MarketLab() {
         setSelectedSymbol((prev) => {
           const next = prev?.toUpperCase?.() ?? "";
           if (filtered.includes(next)) return next;
-          // fall back to defaultSymbol if present, else first in list, else keep prev
           const def = BINANCE.defaultSymbol.toUpperCase();
           if (filtered.includes(def)) return def;
           return filtered[0] ?? next;
@@ -218,6 +308,56 @@ export function MarketLab() {
         setError((prev) => prev ?? `Exchange info: ${formatError(err)}`);
       } finally {
         setSymbolsLoading(false);
+      }
+
+      // Tracked symbols (local DB) probe
+      try {
+        setTrackedError(null);
+        setTrackedStatus("idle");
+
+        const data = await getTrackedSymbols(controller.signal);
+
+        setTrackedStatus("ok");
+        setTrackedRaw(data);
+        setTrackedSymbols(
+          (data.symbols ?? [])
+            .map((s) => s.symbol)
+            .sort((a, b) => a.localeCompare(b))
+        );
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setTrackedStatus("down");
+          setTrackedError(formatError(err));
+          setTrackedRaw(formatError(err));
+        }
+      }
+
+      // Symbol relationships (local DB) probe
+      try {
+        setRelsError(null);
+        setRelsStatus("idle");
+
+        const data = await getSymbolRelationships(controller.signal);
+
+        setRelsStatus("ok");
+        setRelsRaw(data);
+
+        const rows = normaliseRelationshipsResponse(data)
+          .filter((r) => r.enabled)
+          .slice()
+          .sort((a, b) => {
+            const s = a.symbol.localeCompare(b.symbol);
+            if (s !== 0) return s;
+            return a.impactor_symbol.localeCompare(b.impactor_symbol);
+          });
+
+        setRels(rows);
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setRelsStatus("down");
+          setRelsError(formatError(err));
+          setRelsRaw(formatError(err));
+        }
       }
     }
 
@@ -405,6 +545,93 @@ export function MarketLab() {
           </CardHeader>
           <CardContent>
             <CodeBlock value={nodeResponse} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+            <div className="min-w-0">
+              <CardTitle>Tracked Symbols</CardTitle>
+              <CardDescription>
+                Symbols enabled in your local Postgres table{" "}
+                <span className="font-mono">public.tracked_symbols</span>.
+                Confirms DB → Next API → UI.
+              </CardDescription>
+            </div>
+            <StatusBadge status={trackedStatus} />
+          </CardHeader>
+
+          <CardContent className="space-y-3">
+            {trackedError ? (
+              <AlertCard title="Tracked symbols error" variant="warn">
+                {trackedError}
+              </AlertCard>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">
+                Count:{" "}
+                <span className="ml-1 font-mono">{trackedSymbols.length}</span>
+              </Badge>
+
+              {trackedSymbols.slice(0, 10).map((s) => (
+                <Badge key={s} variant="secondary" className="font-mono">
+                  {s}
+                </Badge>
+              ))}
+
+              {trackedSymbols.length > 10 ? (
+                <Badge variant="outline">
+                  +{trackedSymbols.length - 10} more
+                </Badge>
+              ) : null}
+            </div>
+
+            <CodeBlock value={trackedRaw ?? { symbols: [] }} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+            <div className="min-w-0">
+              <CardTitle>Symbol Relationships</CardTitle>
+              <CardDescription>
+                Enabled edges in{" "}
+                <span className="font-mono">public.symbol_relationships</span>{" "}
+                (e.g. <span className="font-mono">ETHUSDT ← BTCUSDT</span>).
+              </CardDescription>
+            </div>
+            <StatusBadge status={relsStatus} />
+          </CardHeader>
+
+          <CardContent className="space-y-3">
+            {relsError ? (
+              <AlertCard title="Relationships error" variant="warn">
+                {relsError}
+              </AlertCard>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">
+                Count: <span className="ml-1 font-mono">{rels.length}</span>
+              </Badge>
+
+              {rels.slice(0, 8).map((r) => (
+                <Badge
+                  key={`${r.symbol}<-${r.impactor_symbol}`}
+                  variant="secondary"
+                  className="font-mono"
+                >
+                  {r.symbol} ← {r.impactor_symbol} (w={r.weight})
+                </Badge>
+              ))}
+
+              {rels.length > 8 ? (
+                <Badge variant="outline">+{rels.length - 8} more</Badge>
+              ) : null}
+            </div>
+
+            <CodeBlock value={relsRaw ?? { relationships: [] }} />
           </CardContent>
         </Card>
       </div>
