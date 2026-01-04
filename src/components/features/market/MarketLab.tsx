@@ -245,6 +245,16 @@ export function MarketLab() {
   const [rels, setRels] = React.useState<SymbolRelationshipRow[]>([]);
   const [relsRaw, setRelsRaw] = React.useState<unknown>(null);
 
+  // impactor relationship
+  const [selectedRelsStatus, setSelectedRelsStatus] =
+    React.useState<ApiStatus>("idle");
+  const [selectedRelsError, setSelectedRelsError] = React.useState<
+    string | null
+  >(null);
+  const [selectedRels, setSelectedRels] = React.useState<
+    SymbolRelationshipRow[]
+  >([]);
+
   // Startup diagnostics (runs once)
   React.useEffect(() => {
     const controller = new AbortController();
@@ -364,6 +374,55 @@ export function MarketLab() {
     loadStartup();
     return () => controller.abort();
   }, []);
+
+  // Relationships for selected symbol (big brothers)
+  React.useEffect(() => {
+    if (!selectedSymbol) return;
+
+    const controller = new AbortController();
+
+    async function loadRelationshipsForSymbol() {
+      try {
+        setSelectedRelsStatus("idle");
+        setSelectedRelsError(null);
+
+        const res = await fetch(
+          `/api/symbol-relationships?symbol=${selectedSymbol}`,
+          { signal: controller.signal, cache: "no-store" }
+        );
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const data = (await res.json()) as {
+          symbols: SymbolRelationshipRow[];
+        };
+
+        console.log("selectedSymbol: ", selectedSymbol);
+
+        console.log("data: ", data);
+
+        setSelectedRels(
+          (data.symbols ?? []).slice().sort((a, b) => {
+            return a.weight === b.weight
+              ? a.impactor_symbol.localeCompare(b.impactor_symbol)
+              : b.weight - a.weight;
+          })
+        );
+
+        setSelectedRelsStatus("ok");
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setSelectedRelsStatus("down");
+          setSelectedRelsError(formatError(err));
+        }
+      }
+    }
+
+    loadRelationshipsForSymbol();
+    return () => controller.abort();
+  }, [selectedSymbol]);
 
   // REST probes per symbol
   React.useEffect(() => {
@@ -632,6 +691,45 @@ export function MarketLab() {
             </div>
 
             <CodeBlock value={relsRaw ?? { relationships: [] }} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-4 space-y-0">
+            <div className="min-w-0">
+              <CardTitle>
+                Impactors for{" "}
+                <span className="font-mono">{selectedSymbol}</span>
+              </CardTitle>
+              <CardDescription>
+                “Big brother” symbols influencing the selected market.
+              </CardDescription>
+            </div>
+            <StatusBadge status={selectedRelsStatus} />
+          </CardHeader>
+
+          <CardContent className="space-y-3">
+            {selectedRelsError ? (
+              <AlertCard title="Relationship lookup error" variant="warn">
+                {selectedRelsError}
+              </AlertCard>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedRels.length === 0 ? (
+                <Badge variant="outline">No relationships</Badge>
+              ) : (
+                selectedRels.map((r) => (
+                  <Badge
+                    key={`${r.symbol}<-${r.impactor_symbol}`}
+                    variant="secondary"
+                    className="font-mono"
+                  >
+                    {r.impactor_symbol} (w={r.weight})
+                  </Badge>
+                ))
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>

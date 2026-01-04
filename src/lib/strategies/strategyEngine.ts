@@ -5,14 +5,19 @@ import type {
 } from "lightweight-charts";
 import type { StrategyId, Trade } from "@/types/types";
 
+import { type Candle } from "@/components/features/market/candlestick/candlestickHelpers";
+
 import { buildMa20CrossTrades } from "./buildMa20CrossTrades";
 import { buildMa20CrossTradesReverse } from "./buildMa20CrossTradesReverse";
 import { buildMa20TpSlTrades } from "./buildMa20TpSlTrades";
 import { buildMa20TrailingTrades } from "./buildMa20TrailingTrades";
+import { buildImpactedTrades } from "./buildImpactedTrades";
 
 type BuildTradesArgs = {
   strategyId: StrategyId;
   formattedCandles: CandlestickData<Time>[];
+  impactorCandles?: Candle[] | undefined;
+  impactorSymbol?: string;
   ma20Data: SingleValueData<Time>[];
   maPeriod: number;
 };
@@ -24,6 +29,8 @@ type BuildTradesArgs = {
 export function buildTradesForStrategy({
   strategyId,
   formattedCandles,
+  impactorCandles,
+  impactorSymbol,
   ma20Data,
   maPeriod
 }: BuildTradesArgs): Trade[] {
@@ -39,6 +46,15 @@ export function buildTradesForStrategy({
 
     case "ma20-trailing-stop":
       return buildMa20TrailingTrades(formattedCandles, ma20Data, maPeriod);
+
+    case "relational-tracker":
+      return buildImpactedTrades(
+        formattedCandles,
+        impactorCandles,
+        impactorSymbol,
+        ma20Data,
+        maPeriod
+      );
 
     case "none":
     default:

@@ -1,177 +1,220 @@
 # Quant Dashboard (Learning Project)
 
-A personal learning repository for building a trading dashboard and research workflow using Binance market data.
+A personal R&D project for building a **professional-grade trading research dashboard** using live exchange data, local compute services, and relational market models.
 
-The focus is on clean architecture, reproducible data pipelines, and testable research and strategy components, while keeping the codebase readable and reviewable by other engineers.
+The focus is on **clean architecture**, **reproducible data pipelines**, and **testable strategy logic**, while keeping the codebase readable and reviewable by other engineers.
 
-This project is designed to evolve incrementally toward professional quant-developer tooling rather than a finished trading system.
+This is **not** a production trading system. It is a structured learning and experimentation environment designed to evolve incrementally toward quant-developer tooling.
 
 ---
 
 ## Tech Stack
 
-- Frontend: Next.js (App Router), React, TypeScript
-- UI: Tailwind CSS + shadcn/ui (Radix UI primitives + CVA variants)
-- State Management: Redux Toolkit
-- API / Orchestration: Node.js + NestJS
-- Research & Compute: Python (FastAPI-based research service)
-- Data Storage (planned): SQLite (local), Postgres (later)
+### Frontend
+
+- **Next.js (App Router)**
+- **React + TypeScript**
+- **Tailwind CSS**
+- **shadcn/ui**
+- **Lightweight Charts** (TradingView) for candlesticks, indicators, and overlays
+
+### Backend / Services
+
+- **Node.js** compute service (Nest-style architecture)
+- **Python** research service (indicators, experiments, backtests)
+- **PostgreSQL** (local, Dockerised)
+
+### Infrastructure
+
+- **Docker** (local Postgres + services)
+- **TablePlus** (database inspection)
+- **REST + WebSockets** (Binance market data)
+- **SQLite → Postgres** migration path (planned)
 
 ---
 
 ## Repository Structure
 
-.
-├─ apps/
-│ ├─ web/ # Next.js UI (dashboard, market lab, backtests)
-│ └─ api/ # Next.js route handlers / server-side proxies
-├─ node/ # Node / NestJS research & diagnostics service
-├─ python/ # Python research & compute service (FastAPI)
+quant-dashboard/
+│
+├─ src/
+│ ├─ app/
+│ │ ├─ market-dashboard/
+│ │ │ └─ page.tsx
+│ │ │ # Primary trading dashboard (charts + strategies)
+│ │ │
+│ │ ├─ lab/
+│ │ │ └─ page.tsx
+│ │ │ # Market Lab (diagnostics, experiments, DB inspection)
+│ │ │
+│ │ ├─ api/
+│ │ │ ├─ tracked-symbols/
+│ │ │ │ └─ route.ts
+│ │ │ ├─ symbol-relationships/
+│ │ │ │ └─ route.ts
+│ │ │ └─ ...
+│ │ │
+│ │ └─ ...
+│ │
+│ ├─ components/
+│ │ ├─ features/
+│ │ │ └─ market/
+│ │ │ ├─ SymbolSelector.tsx
+│ │ │ ├─ CandlestickChart.tsx
+│ │ │ ├─ CandlestickChartContainer.tsx
+│ │ │ └─ ...
+│ │ │
+│ │ └─ ui/
+│ │ └─ ... # shadcn/ui components
+│ │
+│ ├─ lib/
+│ │ ├─ exchanges/
+│ │ │ └─ binance/
+│ │ │ ├─ marketData.ts
+│ │ │ ├─ exchangeInfo.ts
+│ │ │ ├─ time.ts
+│ │ │ └─ config.ts
+│ │ │
+│ │ ├─ strategies/
+│ │ │ └─ ... # Pure strategy logic (no UI, no IO)
+│ │ │
+│ │ ├─ api/
+│ │ │ └─ ... # Client-side fetch helpers
+│ │ │
+│ │ └─ service.ts
+│ │
+│ └─ types/
+│ └─ types.ts
+│
+├─ node/
+│ └─ src/
+│ └─ ... # Node compute service
+│
+├─ python/
+│ └─ research/
+│ └─ src/
+│ └─ ... # Python indicators / experiments
+│
+├─ docker/
+│ └─ docker-compose.yml # Local infrastructure (Postgres, services)
+│
+├─ db/
+│ ├─ schema/
+│ └─ migrations/
+│
 ├─ packages/
-│ └─ shared/ # Shared TypeScript types & utilities
-├─ db/ # Schemas, migrations, seed data (planned)
-├─ docs/ # Roadmap, decisions, architecture notes
+│ └─ shared/ # Shared types / utils (future)
+│
+└─ README.md
 
 ---
 
-## UI Components (shadcn/ui)
+## Application Surfaces
 
-This repository uses shadcn/ui for UI primitives such as Card, Button, Badge, Input, Table, and Tabs.
+### Market Dashboard
 
-Important: shadcn/ui is NOT a runtime dependency or component library.
-It is a code generator that copies React components directly into the repository.
-Once generated, the components are fully owned by this codebase and can be edited freely.
+The **primary user-facing dashboard**:
 
-The generated components live in:
+- Candlestick charts via Lightweight Charts
+- Strategy selection and overlays
+- Designed to stay clean and production-oriented
 
-- apps/web/src/components/ui/
-
-They are built using:
-
-- Tailwind CSS for styling
-- Radix UI for accessible behaviour
-- class-variance-authority (CVA) for variants
-- cn() utility from lib/utils for class merging
-
-### Adding more UI components
-
-If shadcn is already initialised (components.json exists), new components can be added with:
-
-npx shadcn@latest add alert dialog dropdown-menu tooltip table tabs
-
-To verify or change where components are generated, inspect:
-
-- components.json (aliases and ui path)
+This is where validated strategies ultimately live.
 
 ---
 
-## Node Research Service (NestJS)
+### Market Lab
 
-A lightweight NestJS service used as a diagnostics and orchestration layer.
+A **diagnostic and experimentation environment** used to:
 
-Current capabilities:
+- Validate Binance REST and WebSocket connectivity
+- Check local ↔ exchange clock skew
+- Inspect ticker and order book responses
+- Verify Python and Node compute bridges
+- Debug Postgres-backed data (tracked symbols, relationships)
 
-- Health and metadata endpoints (/health, /meta)
-- Aggregated diagnostics endpoint (/diag)
-- Typed request/response contracts
-- A foundational /compute endpoint mirroring the Python service
-- Designed to evolve into a gateway for Python compute, persistence, and scheduling
-
-Default local port:
-
-http://localhost:3001
+The Lab is intentionally verbose and transparent.
 
 ---
 
-## Python Research Service (FastAPI)
+## Data Model (MVP)
 
-A lightweight FastAPI service used for numerical and research-oriented computation.
+### Tracked Symbols
 
-Current capabilities:
+Defines which symbols the app actively supports.
 
-- Health and metadata endpoints (/health, /meta)
-- Typed request/response contracts using Pydantic
-- CORS-safe local development
-- A foundational /compute endpoint designed to evolve into indicators, backtests, and feature generation
+**Table:** `public.tracked_symbols`
 
-The Python service is intentionally minimal and stateless at this stage and will be extended incrementally as research needs grow.
+- `symbol` (TEXT, PK, uppercase)
+- `enabled` (BOOLEAN)
+- `added_at` (TIMESTAMPTZ)
 
-Default local port:
+Used for:
 
-http://localhost:8001
-
----
-
-## Service Topology (Local Development)
-
-Browser (Next.js UI) -> http://localhost:3000
-Node / NestJS -> http://localhost:3001
-Python FastAPI -> http://localhost:8001
+- UI scoping
+- Strategy selection
+- Avoiding duplication of full exchange metadata
 
 ---
 
-## Getting Started
+### Symbol Relationships
 
-Install dependencies and start the frontend:
+Describes how symbols influence one another.
 
-npm install
-npm run dev
+**Table:** `public.symbol_relationships`
 
-Then open:
+- `symbol`
+- `impactor_symbol`
+- `weight`
+- `enabled`
+- `added_at`
 
-http://localhost:3000
+Enables **relationship-aware strategies** such as:
 
----
-
-### Python Research Service
-
-cd services/research-python
-python -m venv .venv
-source .venv/bin/activate
-pip install fastapi uvicorn pydantic
-uvicorn main:app --reload --port 8001
+- BTC → ETH tracking
+- Lead / lag analysis
+- Correlation and divergence detection
 
 ---
 
-### Node Research Service (NestJS)
+## Strategy Architecture
 
-cd services/research-node
-npm install
-npm run start:dev
+Strategies are:
 
----
+- **Pure functions**
+- Isolated from UI, network, and database access
+- Fed with prepared candle data and parameters
+- Swappable via a strategy dropdown
 
-## Development Principles
+Example (planned):
 
-- Explicit, modular architecture
-- Reproducible data and research workflows
-- Clear separation between UI, orchestration, and compute layers
-- Small, readable commits
-- Educational focus over production trading claims
+- **Relational Tracker** — compares a base symbol against weighted impactors from `symbol_relationships`
 
----
-
-## Commit Style
-
-Commits follow a lightweight conventional format:
-
-- feat: new functionality
-- fix: bug fixes
-- refactor: internal restructuring without behaviour change
-- test: add or update tests
-- docs: documentation updates
-- chore: tooling, config, or housekeeping
-
-Examples:
-
-- feat(web): add symbol switcher
-- fix(api): proxy binance exchangeInfo via server
-- refactor(shared): normalise candle types
+Data acquisition and orchestration happens outside the strategy layer.
 
 ---
 
-## Notes
+## Philosophy
 
-This repository is a learning and portfolio project.
+- Prefer **clarity over cleverness**
+- Separate data acquisition from computation
+- Keep strategies deterministic and testable
+- Build incrementally toward professional quant tooling
 
-Market data ingestion, strategy logic, and execution-style components are implemented strictly for educational and simulation purposes only.
+This repository is designed to be read by:
+
+- Hiring managers
+- Quant developers
+- Engineers reviewing architectural decisions
+
+---
+
+## Status
+
+Active, ongoing learning project.
+
+Features are added deliberately, with emphasis on:
+
+- correctness
+- debuggability
+- architectural hygiene

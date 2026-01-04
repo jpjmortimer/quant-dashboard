@@ -4,16 +4,14 @@
  * Educational React wrapper around TradingView's Lightweight Charts (v5).
  *
  * Responsibilities:
- * - Receive an array of normalised `Candle` objects from your container.
- * - Create a candlestick chart once on mount.
- * - Update the chart whenever `candles` changes.
- * - Add a close-price line (yellow).
- * - Add a volume histogram (grey bars).
- * - Add a 20-period Moving Average (MA20) line (blue).
- * - Add a 20-period EMA line (purple).
- * - Add Bollinger Bands (upper/lower, orange).
- * - Add a crosshair hover panel showing OHLC + indicators at cursor time.
- * - Add BUY/SELL markers & P/L based on a pluggable strategy.
+ * - Render candles (OHLC) using Lightweight Charts.
+ * - Overlay indicator lines: Close, MA20, EMA20, Bollinger Bands, RSI14.
+ * - Show crosshair hover panel for OHLC + indicators at cursor time.
+ * - Add BUY/EXIT markers produced by the strategy engine.
+ * - Optional: overlay an "impactor" (big brother) close line as a *scaled* dotted line:
+ *    - We align impactor candles to the little-brother timeline by timestamp (robust).
+ *    - We scale impactor prices so its mean close matches the little brother mean close.
+ *    - This keeps the "shape" comparable on the same price axis (parallel-ness check).
  */
 
 import React from "react";
@@ -31,7 +29,8 @@ import {
   type SingleValueData,
   type SeriesMarker,
   createSeriesMarkers,
-  ColorType
+  ColorType,
+  LineStyle
 } from "lightweight-charts";
 
 import { type StrategyId, type Trade, type HoverInfo } from "@/types/types";
@@ -54,18 +53,101 @@ import {
 } from "@/lib/indicators/indicators";
 
 // Limit how many candles we actually *render* on the chart.
+// (Keeps chart responsive even if your data source grows.)
 const MAX_VISIBLE_CANDLES = 200;
 
-// Small helper to ensure we never feed null/NaN line values into the chart
+/**
+ * Ensure we never feed null/NaN values into Lightweight Charts line series.
+ * (It can behave oddly if you pass non-finite values.)
+ */
 const sanitizeLineData = (
   data: SingleValueData<Time>[]
 ): SingleValueData<Time>[] =>
   data.filter((d) => Number.isFinite(d.value as number));
 
+/**
+ * Convert a Candle openTime (ms) to Lightweight Charts time (seconds).
+ */
+const candleTime = (c: Candle): Time => Math.floor(c.openTime / 1000) as Time;
+
+/**
+ * Mean helper with safety.
+ */
+const mean = (xs: number[]): number =>
+  xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN;
+
+/**
+ * Robust impactor overlay:
+ * - Align by timestamp (little brother drives the timeline)
+ * - Scale impactor close values so impactor mean ~= little mean over the aligned window
+ *
+ * Output:
+ * - SingleValueData<Time>[] suitable for a LineSeries overlay
+ */
+const buildImpactorScaledOverlay = (
+  little: Candle[],
+  impactor: Candle[]
+): SingleValueData<Time>[] => {
+  if (!little?.length || !impactor?.length) return [];
+
+  // Map impactor time -> close (using seconds time to match chart)
+  const impactorCloseByTime = new Map<number, number>();
+  for (const c of impactor) {
+    const t = Number(candleTime(c));
+    const close = Number(c.close);
+    if (Number.isFinite(t) && Number.isFinite(close)) {
+      impactorCloseByTime.set(t, close);
+    }
+  }
+
+  // Build aligned pairs on the little brother timeline.
+  // If an impactor candle is missing for a given time, we skip it (robust).
+  const aligned: Array<{
+    time: Time;
+    littleClose: number;
+    impactorClose: number;
+  }> = [];
+
+  for (const c of little) {
+    const t = candleTime(c);
+    const littleClose = Number(c.close);
+    const impactorClose = impactorCloseByTime.get(Number(t));
+
+    if (!Number.isFinite(littleClose)) continue;
+    if (impactorClose === undefined) continue;
+    if (!Number.isFinite(impactorClose)) continue;
+
+    aligned.push({ time: t, littleClose, impactorClose });
+  }
+
+  if (aligned.length < 5) return []; // not enough overlap to be meaningful
+
+  const meanLittle = mean(aligned.map((p) => p.littleClose));
+  const meanBig = mean(aligned.map((p) => p.impactorClose));
+
+  if (
+    !Number.isFinite(meanLittle) ||
+    !Number.isFinite(meanBig) ||
+    meanBig === 0
+  )
+    return [];
+
+  const k = meanLittle / meanBig;
+
+  return aligned.map((p) => ({
+    time: p.time,
+    value: p.impactorClose * k
+  }));
+};
+
 // Props: we get candles + selected strategy id
 type CandlestickChartProps = {
   candles: Candle[];
   strategyId: StrategyId;
+
+  // Optional: overlay a "big brother" impactor close line
+  impactorCandles?: Candle[];
+  impactorSymbol?: string;
 };
 
 // Minimal shape of the markers API we care about
@@ -75,8 +157,26 @@ type MarkersApi = {
 
 export function CandlestickChart({
   candles,
-  strategyId
+  strategyId,
+  impactorCandles,
+  impactorSymbol
 }: CandlestickChartProps) {
+  // console.log("candles: ", candles);
+  // console.log("impactorSymbol: ", impactorSymbol);
+  // console.log("impactorCandles: ", impactorCandles);
+
+  // const allCandles: any[] = candles.map((candle, index) => ({
+  //   ...candle,
+  //   impactor: impactorCandles
+  //     ? {
+  //         ...(impactorCandles ? impactorCandles[index] : null),
+  //         symbol: impactorSymbol
+  //       }
+  //     : null
+  // }));
+
+  // console.log("allCandles: ", allCandles);
+
   // Crosshair hover state
   const [hoverInfo, setHoverInfo] = React.useState<HoverInfo | null>(null);
   const crosshairHandlerRef = React.useRef<((param: any) => void) | null>(null);
@@ -85,12 +185,14 @@ export function CandlestickChart({
   const [showMA20, setShowMA20] = React.useState(true);
   const [showEMA20, setShowEMA20] = React.useState(true);
   const [showCloseLine, setShowCloseLine] = React.useState(true);
+  const [showImpactorCloseLine, setShowImpactorCloseLine] =
+    React.useState(true);
   const [showVolume, setShowVolume] = React.useState(true);
   const [showBollinger, setShowBollinger] = React.useState(true);
   const [showRSI14, setShowRSI14] = React.useState(true);
 
   // ==========
-  // 1. Refs for chart + DOM node + series
+  // 1) Refs for chart + DOM node + series (created once, mutated imperatively)
   // ==========
 
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -98,6 +200,7 @@ export function CandlestickChart({
 
   const candleSeriesRef = React.useRef<ISeriesApi<"Candlestick"> | null>(null);
   const closeLineSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const impactorLineSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
   const histogramSeriesRef = React.useRef<ISeriesApi<"Histogram"> | null>(null);
   const ma20SeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
   const ema20SeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
@@ -105,11 +208,11 @@ export function CandlestickChart({
   const bbLowerSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
   const rsi14SeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
 
-  // 🔹 Markers plugin ref – created once, then updated via setMarkers
+  // Markers plugin ref – created once, then updated via setMarkers
   const markersPluginRef = React.useRef<MarkersApi | null>(null);
 
   // ==========
-  // 2. Cap how many candles we *show* on the chart
+  // 2) Cap how many candles we *show* on the chart
   // ==========
 
   const visibleCandles = React.useMemo(
@@ -121,40 +224,42 @@ export function CandlestickChart({
   );
 
   // ==========
-  // 3. Convert Candle[] → chart-friendly data
+  // 3) Convert Candle[] -> chart-friendly series data
   // ==========
 
   const formattedCandles: CandlestickData<Time>[] = React.useMemo(
     () =>
-      visibleCandles.map((candle) => ({
-        time: Math.floor(candle.openTime / 1000) as Time, // ms → seconds
-        open: Number(candle.open),
-        high: Number(candle.high),
-        low: Number(candle.low),
-        close: Number(candle.close)
+      visibleCandles.map((c) => ({
+        time: candleTime(c),
+        open: Number(c.open),
+        high: Number(c.high),
+        low: Number(c.low),
+        close: Number(c.close)
       })),
     [visibleCandles]
   );
 
   const closeLineData: SingleValueData<Time>[] = React.useMemo(
     () =>
-      formattedCandles.map((candle) => ({
-        time: candle.time,
-        value: candle.close ?? 0
+      formattedCandles.map((c) => ({
+        time: c.time,
+        value: c.close ?? 0
       })),
     [formattedCandles]
   );
 
   const histogramSeriesData: SingleValueData<Time>[] = React.useMemo(
     () =>
-      visibleCandles.map((candle) => ({
-        time: Math.floor(candle.openTime / 1000) as Time,
-        value: Number(candle.volume ?? 0)
+      visibleCandles.map((c) => ({
+        time: candleTime(c),
+        value: Number(c.volume ?? 0)
       })),
     [visibleCandles]
   );
 
+  // Indicator config
   const MA_PERIOD = 20;
+  const BB_STD_MULTIPLIER = 2;
 
   // Base series of closes for indicator calculations
   const closeSeriesForIndicators: TimeValuePoint[] = React.useMemo(
@@ -166,7 +271,6 @@ export function CandlestickChart({
     [formattedCandles]
   );
 
-  // --- MA20 (simple moving average) ---
   const ma20Data: SingleValueData<Time>[] = React.useMemo(
     () =>
       calculateSma(closeSeriesForIndicators, MA_PERIOD).map((p) => ({
@@ -176,7 +280,6 @@ export function CandlestickChart({
     [closeSeriesForIndicators]
   );
 
-  // --- EMA20 ---
   const ema20Data: SingleValueData<Time>[] = React.useMemo(
     () =>
       calculateEma(closeSeriesForIndicators, MA_PERIOD).map((p) => ({
@@ -185,9 +288,6 @@ export function CandlestickChart({
       })),
     [closeSeriesForIndicators]
   );
-
-  // --- Bollinger Bands ---
-  const BB_STD_MULTIPLIER = 2;
 
   const bollingerData = React.useMemo(() => {
     const { middle, upper, lower } = calculateBollinger(
@@ -203,18 +303,25 @@ export function CandlestickChart({
     };
   }, [closeSeriesForIndicators]);
 
-  // --- RSI 14 ---
   const rsi14Data: SingleValueData<Time>[] = React.useMemo(() => {
     const raw = calculateRsi(visibleCandles, 14).map((point) => ({
       time: point.time as Time,
       value: point.value
     }));
-
     return sanitizeLineData(raw);
   }, [visibleCandles]);
 
   // ==========
-  // 3.5 Strategy: build trades via strategy engine
+  // 3.25) Optional impactor overlay data (robust timestamp alignment + mean scaling)
+  // ==========
+
+  const impactorOverlayData: SingleValueData<Time>[] = React.useMemo(() => {
+    if (!impactorCandles || impactorCandles.length === 0) return [];
+    return buildImpactorScaledOverlay(visibleCandles, impactorCandles);
+  }, [visibleCandles, impactorCandles]);
+
+  // ==========
+  // 3.5) Strategy: build trades + compute backtest analytics
   // ==========
 
   const trades: Trade[] = React.useMemo(
@@ -222,13 +329,21 @@ export function CandlestickChart({
       buildTradesForStrategy({
         strategyId,
         formattedCandles,
+        impactorCandles,
+        impactorSymbol,
         ma20Data,
         maPeriod: MA_PERIOD
       }),
-    [strategyId, formattedCandles, ma20Data]
+    [
+      strategyId,
+      formattedCandles,
+      impactorCandles,
+      impactorSymbol,
+      ma20Data,
+      MA_PERIOD
+    ]
   );
 
-  // NEW: backtest analytics from those trades
   const backtestResult = React.useMemo(
     () =>
       runBacktestFromTrades({
@@ -244,27 +359,23 @@ export function CandlestickChart({
   const stats = backtestResult.stats;
   const equityCurve = backtestResult.equityCurve;
 
-  // Time range of the main chart – shared with the equity curve
   const timeRange = React.useMemo(() => {
     if (formattedCandles.length === 0) return undefined;
-
     const first = formattedCandles[0].time;
     const last = formattedCandles[formattedCandles.length - 1].time;
-
     return { from: first, to: last };
   }, [formattedCandles]);
 
-  /**
-   * Markers for entries (BUY) and exits (EXIT).
-   *
-   * If strategyId = "none", trades[] is empty → no markers.
-   */
+  // ==========
+  // 3.75) Markers from trades
+  // ==========
+
   const entryMarkers: SeriesMarker<Time>[] = React.useMemo(
     () =>
       trades.map((trade) => ({
         time: trade.entryTime,
         position: "belowBar",
-        color: "#22c55e", // green
+        color: "#22c55e",
         shape: "arrowUp",
         text: "BUY"
       })),
@@ -290,10 +401,9 @@ export function CandlestickChart({
   );
 
   // ==========
-  // 4. Create / update the chart
+  // 4) Create chart + series ONCE (mount/unmount lifecycle)
   // ==========
 
-  // Create chart + series once
   React.useEffect(() => {
     if (!containerRef.current) return;
 
@@ -301,29 +411,20 @@ export function CandlestickChart({
 
     const chart = createChart(container, {
       layout: {
-        background: {
-          type: ColorType.Solid,
-          color: "#020617"
-        },
+        background: { type: ColorType.Solid, color: "#020617" },
         textColor: "#e5e7eb"
       },
       width: container.clientWidth || 600,
       height: 400,
-      timeScale: {
-        timeVisible: true,
-        secondsVisible: true
-      },
+      timeScale: { timeVisible: true, secondsVisible: true },
       rightPriceScale: {
-        scaleMargins: {
-          top: 0.05,
-          bottom: 0.3
-        }
+        scaleMargins: { top: 0.05, bottom: 0.3 }
       }
     });
 
     chartRef.current = chart;
 
-    // Create series once
+    // Main candlesticks
     candleSeriesRef.current = chart.addSeries(CandlestickSeries, {
       upColor: "#22c55e",
       downColor: "#ef4444",
@@ -332,24 +433,32 @@ export function CandlestickChart({
       wickDownColor: "#ef4444"
     });
 
+    // Close line (solid yellow)
     closeLineSeriesRef.current = chart.addSeries(LineSeries, {
       color: "#facc15",
       lineWidth: 2,
       priceLineVisible: false
     });
 
+    // Impactor overlay line (dotted yellow) - data is scaled before plotting
+    impactorLineSeriesRef.current = chart.addSeries(LineSeries, {
+      color: "rgba(250, 204, 21, 0.7)",
+      lineWidth: 2,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false
+    });
+
+    // Volume histogram (separate priceScaleId)
     histogramSeriesRef.current = chart.addSeries(HistogramSeries, {
       color: "#4b5563",
       priceScaleId: "volume"
     });
 
     chart.priceScale("volume").applyOptions({
-      scaleMargins: {
-        top: 0.8,
-        bottom: 0
-      }
+      scaleMargins: { top: 0.8, bottom: 0 }
     });
 
+    // Indicators
     ma20SeriesRef.current = chart.addSeries(LineSeries, {
       color: "#38bdf8",
       lineWidth: 2,
@@ -374,7 +483,7 @@ export function CandlestickChart({
       priceLineVisible: false
     });
 
-    // 🔹 NEW: RSI series in its own bottom panel
+    // RSI (bottom band panel)
     rsi14SeriesRef.current = chart.addSeries(LineSeries, {
       color: "#22d3ee",
       lineWidth: 1,
@@ -383,16 +492,16 @@ export function CandlestickChart({
     });
 
     chart.priceScale("rsi").applyOptions({
-      scaleMargins: {
-        top: 0.85, // bottom band
-        bottom: 0
-      }
+      scaleMargins: { top: 0.85, bottom: 0 }
     });
 
-    // Initial visibility for toggles
+    // Apply initial visibility
     ma20SeriesRef.current.applyOptions({ visible: showMA20 });
     ema20SeriesRef.current.applyOptions({ visible: showEMA20 });
     closeLineSeriesRef.current.applyOptions({ visible: showCloseLine });
+    impactorLineSeriesRef.current.applyOptions({
+      visible: showImpactorCloseLine
+    });
     histogramSeriesRef.current.applyOptions({ visible: showVolume });
     bbUpperSeriesRef.current.applyOptions({ visible: showBollinger });
     bbLowerSeriesRef.current.applyOptions({ visible: showBollinger });
@@ -422,12 +531,11 @@ export function CandlestickChart({
       const time = param.time as Time;
 
       let timeLabel = "";
-      if (typeof time === "number") {
+      if (typeof time === "number")
         timeLabel = new Date(time * 1000).toLocaleTimeString();
-      } else if (typeof time === "string") {
-        timeLabel = time;
-      }
+      else if (typeof time === "string") timeLabel = time;
 
+      // Helper: read the value for a given series at the crosshair time
       const getSeriesValue = (
         series:
           | ISeriesApi<"Candlestick">
@@ -436,8 +544,7 @@ export function CandlestickChart({
           | null
       ) => {
         if (!series) return undefined;
-        const raw = param.seriesData.get(series);
-        return raw as any | undefined;
+        return param.seriesData.get(series) as any | undefined;
       };
 
       const candleData = getSeriesValue(candleSeriesRef.current) as
@@ -486,7 +593,7 @@ export function CandlestickChart({
     chart.subscribeCrosshairMove(crosshairHandler);
     crosshairHandlerRef.current = crosshairHandler;
 
-    // 🔹 Initialise markers plugin with no markers (create ONCE)
+    // Markers plugin initialisation
     if (candleSeriesRef.current) {
       markersPluginRef.current = createSeriesMarkers(
         candleSeriesRef.current,
@@ -494,22 +601,18 @@ export function CandlestickChart({
       );
     }
 
-    // Cleanup ONLY on unmount
+    // Cleanup on unmount
     return () => {
       if (chartRef.current && crosshairHandlerRef.current) {
         chartRef.current.unsubscribeCrosshairMove(crosshairHandlerRef.current);
         crosshairHandlerRef.current = null;
       }
 
-      // No markersPluginRef.current.remove() – plugin is bound to the series,
-      // and chart.remove() will dispose everything.
       markersPluginRef.current = null;
 
       if (chartRef.current) {
         const resizeHandler = (chartRef.current as any).__handleResize__;
-        if (resizeHandler) {
-          window.removeEventListener("resize", resizeHandler);
-        }
+        if (resizeHandler) window.removeEventListener("resize", resizeHandler);
 
         chartRef.current.remove();
         chartRef.current = null;
@@ -517,6 +620,7 @@ export function CandlestickChart({
 
       candleSeriesRef.current = null;
       closeLineSeriesRef.current = null;
+      impactorLineSeriesRef.current = null;
       histogramSeriesRef.current = null;
       ma20SeriesRef.current = null;
       ema20SeriesRef.current = null;
@@ -529,25 +633,40 @@ export function CandlestickChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // chart created once
 
-  // Push data + markers + visibility whenever data / strategy / toggles change
+  // ==========
+  // 5) Push data + visibility + markers whenever inputs change
+  // ==========
+
   React.useEffect(() => {
     if (!chartRef.current) return;
 
+    // Candles + autoscale
     if (candleSeriesRef.current) {
       candleSeriesRef.current.setData(formattedCandles);
       chartRef.current.timeScale().fitContent();
     }
 
+    // Close (solid)
     if (closeLineSeriesRef.current) {
       closeLineSeriesRef.current.setData(closeLineData);
       closeLineSeriesRef.current.applyOptions({ visible: showCloseLine });
     }
 
+    // Impactor overlay (dotted) - robust aligned + scaled
+    if (impactorLineSeriesRef.current) {
+      impactorLineSeriesRef.current.setData(impactorOverlayData);
+      impactorLineSeriesRef.current.applyOptions({
+        visible: showImpactorCloseLine && impactorOverlayData.length > 0
+      });
+    }
+
+    // Volume
     if (histogramSeriesRef.current) {
       histogramSeriesRef.current.setData(histogramSeriesData);
       histogramSeriesRef.current.applyOptions({ visible: showVolume });
     }
 
+    // MA / EMA
     if (ma20SeriesRef.current) {
       ma20SeriesRef.current.setData(sanitizeLineData(ma20Data));
       ma20SeriesRef.current.applyOptions({ visible: showMA20 });
@@ -558,6 +677,7 @@ export function CandlestickChart({
       ema20SeriesRef.current.applyOptions({ visible: showEMA20 });
     }
 
+    // Bollinger
     if (bbUpperSeriesRef.current) {
       bbUpperSeriesRef.current.setData(sanitizeLineData(bollingerData.upper));
       bbUpperSeriesRef.current.applyOptions({ visible: showBollinger });
@@ -568,16 +688,16 @@ export function CandlestickChart({
       bbLowerSeriesRef.current.applyOptions({ visible: showBollinger });
     }
 
+    // RSI
     if (rsi14SeriesRef.current) {
       rsi14SeriesRef.current.setData(sanitizeLineData(rsi14Data));
       rsi14SeriesRef.current.applyOptions({ visible: showRSI14 });
     }
 
-    // 🔹 Strategy markers (BUY / EXIT)
+    // Strategy markers
     const markersApi = markersPluginRef.current;
     if (markersApi) {
-      const markersToApply = strategyId === "none" ? [] : allMarkers;
-      markersApi.setMarkers(markersToApply);
+      markersApi.setMarkers(strategyId === "none" ? [] : allMarkers);
     }
   }, [
     formattedCandles,
@@ -588,9 +708,11 @@ export function CandlestickChart({
     bollingerData,
     rsi14Data,
     allMarkers,
+    impactorOverlayData,
     showMA20,
     showEMA20,
     showCloseLine,
+    showImpactorCloseLine,
     showVolume,
     showBollinger,
     showRSI14,
@@ -598,7 +720,7 @@ export function CandlestickChart({
   ]);
 
   // ==========
-  // 6. "no candles yet" UI
+  // 6) "no candles yet" UI
   // ==========
 
   if (!candles || candles.length === 0) {
@@ -626,7 +748,7 @@ export function CandlestickChart({
   }
 
   // ==========
-  // 7. Debug / summary UI
+  // 7) Debug / summary UI
   // ==========
 
   const last = candles[candles.length - 1];
@@ -652,6 +774,15 @@ export function CandlestickChart({
         <strong>{visibleCandles.length}</strong>
       </p>
 
+      {impactorSymbol ? (
+        <p style={{ fontSize: "0.8rem", opacity: 0.8 }}>
+          Impactor overlay: <strong>{impactorSymbol}</strong>{" "}
+          {impactorOverlayData.length > 0
+            ? "(scaled + aligned)"
+            : "(no overlap)"}
+        </p>
+      ) : null}
+
       {/* Chart container */}
       <div
         ref={containerRef}
@@ -673,6 +804,9 @@ export function CandlestickChart({
         setShowEMA20={setShowEMA20}
         showCloseLine={showCloseLine}
         setShowCloseLine={setShowCloseLine}
+        showImpactorCloseLine={showImpactorCloseLine}
+        setShowImpactorCloseLine={setShowImpactorCloseLine}
+        impactorSymbol={impactorSymbol}
         showVolume={showVolume}
         setShowVolume={setShowVolume}
         showBollinger={showBollinger}
@@ -687,7 +821,6 @@ export function CandlestickChart({
         </div>
       )}
 
-      {/* Simple strategy performance summary – only if a strategy is active */}
       {strategyId !== "none" && (
         <div
           style={{
@@ -705,6 +838,8 @@ export function CandlestickChart({
           ) : (
             <>
               <BacktestResultsPanel
+                strategyId={strategyId}
+                impactorSymbol={impactorSymbol}
                 stats={stats}
                 trades={backtestResult.trades}
                 startingBalance={backtestResult.config.startingBalance}
@@ -715,7 +850,6 @@ export function CandlestickChart({
         </div>
       )}
 
-      {/* Debug table of last 5 visible candles */}
       <h3>Last {recent.length} visible candles</h3>
       <table style={{ fontSize: "0.8rem", borderCollapse: "collapse" }}>
         <thead>
@@ -728,15 +862,15 @@ export function CandlestickChart({
           </tr>
         </thead>
         <tbody>
-          {recent.map((candle) => {
-            const t = new Date(candle.openTime);
+          {recent.map((c) => {
+            const t = new Date(c.openTime);
             return (
-              <tr key={candle.openTime}>
+              <tr key={c.openTime}>
                 <td style={{ padding: "2px 4px" }}>{t.toLocaleTimeString()}</td>
-                <td style={{ padding: "2px 4px" }}>{candle.open}</td>
-                <td style={{ padding: "2px 4px" }}>{candle.high}</td>
-                <td style={{ padding: "2px 4px" }}>{candle.low}</td>
-                <td style={{ padding: "2px 4px" }}>{candle.close}</td>
+                <td style={{ padding: "2px 4px" }}>{c.open}</td>
+                <td style={{ padding: "2px 4px" }}>{c.high}</td>
+                <td style={{ padding: "2px 4px" }}>{c.low}</td>
+                <td style={{ padding: "2px 4px" }}>{c.close}</td>
               </tr>
             );
           })}

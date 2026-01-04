@@ -36,7 +36,8 @@ export type StrategyId =
   | "ma20-cross"
   | "ma20-cross-rev"
   | "ma20-cross-tp-sl"
-  | "ma20-trailing-stop";
+  | "ma20-trailing-stop"
+  | "relational-tracker";
 
 export type StrategySelectorProps = {
   strategyId: StrategyId;

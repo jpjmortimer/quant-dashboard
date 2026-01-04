@@ -13,21 +13,43 @@ const pool =
 // Ensure this runs on Node.js runtime (not Edge) because pg needs Node APIs
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const { rows } = await pool.query<{
-      symbol: string;
-      impactor_symbol: string;
-      weight: number;
-      added_at: string;
-    }>(
-      `
-      SELECT symbol, impactor_symbol, weight, enabled, added_at
+    const { searchParams } = new URL(req.url);
+
+    const symbol = searchParams.get("symbol");
+    const impactor = searchParams.get("impactor");
+
+    const conditions: string[] = ["enabled = true"];
+    const values: unknown[] = [];
+
+    if (symbol) {
+      values.push(symbol.toUpperCase());
+      conditions.push(`symbol = $${values.length}`);
+    }
+
+    if (impactor) {
+      values.push(impactor.toUpperCase());
+      conditions.push(`impactor_symbol = $${values.length}`);
+    }
+
+    const whereClause = conditions.length
+      ? `WHERE ${conditions.join(" AND ")}`
+      : "";
+
+    const query = `
+      SELECT
+        symbol,
+        impactor_symbol,
+        weight,
+        enabled,
+        added_at
       FROM public.symbol_relationships
-      WHERE enabled = true
-      ORDER BY symbol;
-      `
-    );
+      ${whereClause}
+      ORDER BY symbol, impactor_symbol;
+    `;
+
+    const { rows } = await pool.query(query, values);
 
     return NextResponse.json({ symbols: rows });
   } catch (err) {

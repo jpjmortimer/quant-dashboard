@@ -12,7 +12,8 @@ const strategies: { id: StrategyId; name: string }[] = [
   { id: "ma20-cross", name: "MA20 Cross (Basic)" },
   { id: "ma20-cross-rev", name: "MA20 Cross (Basic) Reverse" },
   { id: "ma20-cross-tp-sl", name: "MA20 Cross (Take Profit / Stop Loss)" },
-  { id: "ma20-trailing-stop", name: "MA20 Cross (Trailing Stop)" }
+  { id: "ma20-trailing-stop", name: "MA20 Cross (Trailing Stop)" },
+  { id: "relational-tracker", name: "Relational Tracker (Big Brother)" }
 ];
 
 export function StrategySelector({

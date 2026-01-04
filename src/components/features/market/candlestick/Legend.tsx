@@ -5,11 +5,13 @@ type LegendProps = {
   setShowEMA20: (value: boolean) => void;
   showCloseLine: boolean;
   setShowCloseLine: (value: boolean) => void;
+  showImpactorCloseLine: boolean;
+  setShowImpactorCloseLine: (value: boolean) => void;
+  impactorSymbol?: string;
   showVolume: boolean;
   setShowVolume: (value: boolean) => void;
   showBollinger: boolean;
   setShowBollinger: (value: boolean) => void;
-  // 🔹 NEW: RSI toggle
   showRSI14: boolean;
   setShowRSI14: (value: boolean) => void;
 };
@@ -21,6 +23,9 @@ export function Legend({
   setShowEMA20,
   showCloseLine,
   setShowCloseLine,
+  showImpactorCloseLine,
+  setShowImpactorCloseLine,
+  impactorSymbol,
   showVolume,
   setShowVolume,
   showBollinger,
@@ -81,6 +86,25 @@ export function Legend({
           }}
         />
         <span>Close line (yellow)</span>
+      </div>
+
+      {/* Impactor Close line */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+        <input
+          type="checkbox"
+          checked={showImpactorCloseLine}
+          onChange={(event) => setShowImpactorCloseLine(event.target.checked)}
+        />
+        <span
+          style={{
+            width: "14px",
+            height: "0",
+            borderTop: "2px dashed #facc15"
+          }}
+        />
+        <span>
+          {impactorSymbol ? impactorSymbol : "Impactor"} close line (yellow)
+        </span>
       </div>
 
       {/* MA20 line */}
